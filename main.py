@@ -2,7 +2,7 @@ import tensorflow as tf
 import numpy as np
 from environment import RideshareEnv  # Your custom environment
 from agent import RLAgent  # Your RL agent class
-from utils import save_model, load_model, evaluate_agent  # Utility functions
+from utils import save_model, load_model, evaluate_agent, preprocess_observation  # Utility functions
 
 
 def main():
@@ -10,19 +10,21 @@ def main():
     # 1. Hyperparameters
     # -------------------------------
     config = {
-        'episodes': 1000,
+        'episodes': 10,
         'learning_rate': 0.001,
         'gamma': 0.99,
         'batch_size': 64,
         'eval_frequency': 50,
         'save_model_path': 'models/rideshare_rl',
+        'tflitemodel_path': 'models/rideshare_rl.tflite'
     }
 
     # -------------------------------
     # 2. Initialize Environment
     # -------------------------------
     env = RideshareEnv()  # Replace with your actual environment initialization
-    state_dim = env.observation_space.shape[0]
+    demand_dim = env.grid_size[0] * env.grid_size[1]
+    state_dim = env.num_vehicles * 2 + demand_dim
     action_dim = env.action_space.n
 
     # -------------------------------
@@ -35,21 +37,24 @@ def main():
     # -------------------------------
     for episode in range(config['episodes']):
         state = env.reset()
+        observation = preprocess_observation(state)
         total_reward = 0
         done = False
 
         while not done:
             # Agent selects action
-            action = agent.select_action(state)
+            action = agent.select_action(observation)
 
             # Environment returns next state and reward
-            next_state, reward, done, info = env.step(action)
+            next_obs, reward, done, info = env.step(action)
+
+            next_obs = preprocess_observation(next_obs)
 
             # Store experience and train
-            agent.store_experience(state, action, reward, next_state, done)
-            agent.train(batch_size=config['batch_size'])
+            agent.store_experience(observation, action, reward, next_obs, done)
+            agent.train()
 
-            state = next_state
+            observation = next_obs
             total_reward += reward
 
         print(f"Episode {episode + 1}/{config['episodes']}, Total Reward: {total_reward}")
@@ -64,7 +69,7 @@ def main():
     # -------------------------------
     # 6. Final Save
     # -------------------------------
-    save_model(agent, config['save_model_path'])
+    save_model(agent, config['save_model_path'], config['tflitemodel_path'])
     print("Training Complete! Model saved.")
 
 

@@ -41,10 +41,16 @@ class RLAgent:
         Returns:
             tf.keras.Model: The compiled model.
         """
+        # model = tf.keras.Sequential([
+        #     tf.keras.layers.Dense(64, activation='relu', input_shape=(self.state_dim,2)),
+        #     tf.keras.layers.Dense(64, activation='relu'),
+        #     tf.keras.layers.Dense(self.action_dim, activation='linear')  # Linear activation for Q-values
+        # ])
         model = tf.keras.Sequential([
-            tf.keras.layers.Dense(64, activation='relu', input_shape=(self.state_dim,)),
+            tf.keras.layers.Dense(64, activation='relu',input_shape=(self.state_dim,)),  # Adjust as needed
             tf.keras.layers.Dense(64, activation='relu'),
-            tf.keras.layers.Dense(self.action_dim, activation='linear')  # Linear activation for Q-values
+            tf.keras.layers.Dense(64, activation='relu'),
+            tf.keras.layers.Dense(self.action_dim, activation='linear')  # Flat output
         ])
         model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=self.learning_rate), loss='mse')
         return model
@@ -67,9 +73,15 @@ class RLAgent:
             int: Selected action.
         """
         if np.random.rand() < epsilon:
+            # print('random action')
             return np.random.randint(self.action_dim)  # Random action
-        q_values = self.model.predict(np.expand_dims(state, axis=0), verbose=0)
-        return np.argmax(q_values[0])  # Greedy action
+        state = np.expand_dims(state, axis=0)
+        q_values = self.model.predict(state, verbose=0)
+        action = np.argmax(q_values[0])
+        # Ensure the action is within bounds
+        action = max(0, min(action, self.action_dim - 1))
+        # print('greedy action')
+        return action  # Greedy action
 
     def store_experience(self, state, action, reward, next_state, done):
         """
@@ -82,6 +94,10 @@ class RLAgent:
             next_state (np.array): Next state.
             done (bool): Whether the episode is done.
         """
+        # Validate action
+        assert 0 <= action < self.action_dim, f"Invalid action: {action} (Action Dim: {self.action_dim})"
+
+        # Add to buffer
         self.replay_buffer.append((state, action, reward, next_state, done))
 
     def train(self):
@@ -89,12 +105,14 @@ class RLAgent:
         Train the agent using a batch of experiences from the replay buffer.
         """
         if len(self.replay_buffer) < self.batch_size:
+            # print('not enough experiences')
             return  # Not enough samples to train
 
+        # print('start training on experiences')
         # Sample a batch of experiences
         batch = random.sample(self.replay_buffer, self.batch_size)
         states, actions, rewards, next_states, dones = map(np.array, zip(*batch))
-
+        # print(len(states))
         # Predict Q-values
         q_values = self.model.predict(states, verbose=0)
         next_q_values = self.target_model.predict(next_states, verbose=0)

@@ -1,6 +1,7 @@
 import numpy as np
 import gymnasium
 from gymnasium import spaces
+from tensorflow.python.keras.backend import dtype
 
 
 class RideshareEnv(gymnasium.Env):
@@ -27,13 +28,19 @@ class RideshareEnv(gymnasium.Env):
         # Define action and observation spaces
         self.action_space = spaces.Discrete(
             self.num_vehicles * 5)  # 5 actions per vehicle (stay, up, down, left, right)
-        self.observation_space = spaces.Box(
-            low=0, high=max(self.grid_size), shape=(self.num_vehicles, 2), dtype=np.int32
-        )
+        self.observation_space = spaces.Dict({
+            "vehicle_positions": spaces.Box(
+                low=0, high=max(self.grid_size), shape=(self.num_vehicles, 2), dtype=np.int32
+            ),
+            "demand_grid": spaces.Box(
+                low=0, high=15, shape=(self.grid_size[0],self.grid_size[1]), dtype=np.int32
+            )
+        })
 
         # Initialize state
-        self.state = None
         self.demand = None
+        self.demand_grid = None
+        self.state = None
         self.reset()
 
     def reset(self):
@@ -44,8 +51,12 @@ class RideshareEnv(gymnasium.Env):
             np.array: Initial state.
         """
         self.current_step = 0
-        self.state = np.random.randint(0, self.grid_size[0], size=(self.num_vehicles, 2))
         self.demand = self.generate_demand()
+        self.convert_demand()
+        self.state = {
+            "vehicle_positions":np.random.randint(0, self.grid_size[0], size=(self.num_vehicles, 2)),
+            "demand_grid":self.demand_grid
+        }
         return self.state
 
     def step(self, action):
@@ -91,8 +102,20 @@ class RideshareEnv(gymnasium.Env):
         Returns:
             np.array: Array of demand locations.
         """
-        num_demands = np.random.randint(5, 15)
+        # num_demands = np.random.randint(5, 15)
+        num_demands = 15
         return np.random.randint(0, self.grid_size[0], size=(num_demands, 2))
+
+    def convert_demand(self):
+        """
+        Generate random demand locations.
+
+        Returns:
+            np.array: Array of demand locations.
+        """
+        self.demand_grid = np.zeros((self.grid_size[0], self.grid_size[1]), dtype=int)
+        for x, y in self.demand:
+            self.demand_grid[x,y] += 1
 
     def move_vehicle(self, vehicle_idx, movement):
         """
@@ -103,13 +126,13 @@ class RideshareEnv(gymnasium.Env):
             movement (int): Movement action (0: stay, 1: up, 2: down, 3: left, 4: right).
         """
         if movement == 1:  # Up
-            self.state[vehicle_idx][0] = max(0, self.state[vehicle_idx][0] - 1)
+            self.state["vehicle_positions"][vehicle_idx][0] = max(0, self.state["vehicle_positions"][vehicle_idx][0] - 1)
         elif movement == 2:  # Down
-            self.state[vehicle_idx][0] = min(self.grid_size[0] - 1, self.state[vehicle_idx][0] + 1)
+            self.state["vehicle_positions"][vehicle_idx][0] = min(self.grid_size[0] - 1, self.state["vehicle_positions"][vehicle_idx][0] + 1)
         elif movement == 3:  # Left
-            self.state[vehicle_idx][1] = max(0, self.state[vehicle_idx][1] - 1)
+            self.state["vehicle_positions"][vehicle_idx][1] = max(0, self.state["vehicle_positions"][vehicle_idx][1] - 1)
         elif movement == 4:  # Right
-            self.state[vehicle_idx][1] = min(self.grid_size[1] - 1, self.state[vehicle_idx][1] + 1)
+            self.state["vehicle_positions"][vehicle_idx][1] = min(self.grid_size[1] - 1, self.state["vehicle_positions"][vehicle_idx][1] + 1)
 
     def calculate_reward(self):
         """
@@ -120,7 +143,7 @@ class RideshareEnv(gymnasium.Env):
         """
         reward = 0
         for demand_location in self.demand:
-            distances = np.linalg.norm(self.state - demand_location, axis=1)
+            distances = np.linalg.norm(self.state["vehicle_positions"] - demand_location, axis=1)
             closest_vehicle_idx = np.argmin(distances)
             if distances[closest_vehicle_idx] < 1.0:  # Demand fulfilled
                 reward += 10  # Positive reward for fulfilling demand
