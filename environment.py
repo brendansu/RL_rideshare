@@ -8,13 +8,14 @@ from shapely.geometry import shape
 import pickle
 from math import atan2, degrees
 import os
+import networkx as nx
 
 class RideshareEnv(gymnasium.Env):
     """
     Custom Rideshare Environment for reinforcement learning.
     """
 
-    def __init__(self, num_vehicles=10, grid_size=(10, 10), max_steps=100, map_name = 'grid'):
+    def __init__(self, num_vehicles=10, grid_size=(10, 10), max_steps=100, map_name = 'grid_projected'):
         """
         Initialize the Rideshare environment.
 
@@ -26,6 +27,8 @@ class RideshareEnv(gymnasium.Env):
         super(RideshareEnv, self).__init__()
 
         self.map = self.parse_map(map_name)
+        self.grid_map = gpd.read_file("grid_projected.geojson")
+        self.graph = self.build_hex_grid_graph()
         self.num_vehicles = num_vehicles
         self.grid_size = grid_size
         self.max_steps = max_steps
@@ -218,7 +221,7 @@ class RideshareEnv(gymnasium.Env):
                     return "south-east"
 
             # Determine neighbors and assign directions
-            threshold = 0.035  # Adjust based on expected distance between hexagons: 0.0336 -> 1.73 miles
+            threshold = 3000  # Adjust based on expected distance between hexagons: 2784 meters -> 1.73 miles
             for cell_id, centroid in centroids.items():
                 for other_id, other_centroid in centroids.items():
                     if cell_id != other_id and centroid.distance(other_centroid) < threshold:
@@ -230,3 +233,45 @@ class RideshareEnv(gymnasium.Env):
             print(f"Grid map saved to {map_name + '.pickle'}")
 
             return grid_map
+
+    def build_hex_grid_graph(self):
+        G = nx.Graph()
+        for idx, row in self.grid_map.iterrows():
+            grid_id = row['id']
+            G.add_node(grid_id)  # Add grid cell as a node
+
+            # Add edges to neighbors (assuming 'neighbors' exists as a property)
+            for neighbor in row.get('neighbors', []):  # Replace with actual neighbors key if available
+                G.add_edge(grid_id, neighbor)
+        return G
+
+    def route_solo(self, pickup, dropoff):
+        try:
+            path = nx.shortest_path(self.graph, source=pickup, target=dropoff)
+            return path
+        except nx.NetworkXNoPath:
+            return [pickup, dropoff]
+        except KeyError:
+            return []
+
+    def match_solo(self, grid_id):
+        '''
+        Perform the order matching within a grid
+
+        Pseudo code here:
+        solo order list = read_order(grid_id)
+        solo order list -> queue ['trip_id_1', 'trip_id_2', ...]
+        solo idle vehicle list = find_vehicle(grid_id)
+        solo idle vehicle list -> queue ['veh_id_1', 'veh_id_2', ...]
+        while solo order list and solo idle vehicle list:
+            trip_id = solo order list.pop()
+            veh_id = solo order list.pop()
+            self.update_od_pair(trip_id, veh_id)
+
+
+        Args:
+            grid_id: the id of the grid where the order matching task is going to be performed
+
+        Returns:
+
+        '''
