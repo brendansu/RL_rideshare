@@ -9,6 +9,9 @@ geo_df = geo_df.set_crs(epsg=4326)
 # Reproject to UTM or local projection (e.g., EPSG:26971 for Chicago)
 projected_df = geo_df.to_crs(epsg=26971)
 
+# Assign unique IDs to each grid
+projected_df['id'] = range(1, len(projected_df) + 1)
+
 # Access projected coordinates
 for idx, row in projected_df.iterrows():
     print(row['geometry'])  # Now in planar coordinates
