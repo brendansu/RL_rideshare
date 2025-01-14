@@ -60,6 +60,11 @@ class MyMultiAgentEnv(MultiAgentEnv):
             self.all_demands['id']['wait_time'] += 1 # add one time step to the wait time of all trips in curr_demands
 
         # dispatch order
+        for veh in self.fleet_status: # get idle vehicle queue
+            if veh['time_2_empty'] == 0:
+                curr_supply.
+
+
 
 
         # get repositioning moves at each step
@@ -68,8 +73,26 @@ class MyMultiAgentEnv(MultiAgentEnv):
         for i in range(self.grid_cnt):
             moves[] = action_dict[f"zone_{i}"] # get move of each zone
 
-        # update fleet vehicle distribution
+        # if vehicle is going to stay
 
+        # update fleet vehicle distribution
+        for veh in self.fleet_status:
+            # update vehicle status
+            # reposition vehicle: current grid update to reposition target grid, mileage plus one, time to empty set to zero
+            # in task vehicle: if time to empty is 1, set to zero then update current grid, if time to empty more than 1, time to empty minus one, mileage plus one
+            if veh['repo_flag'] == 1:
+                veh['repo_flag'] = 0 # reset reposition flag
+                veh['tot_mile'] += 1 # add mileage
+                dest = veh['dest_grid'] # get destination
+                veh['curr_grid'] = dest # update position
+                veh['dest_grid'] = None # update destination
+            elif veh['time_2_empty'] != 0:
+                veh['tot_mile'] += 1 # add mileage
+                if veh['time_2_empty'] == 1: # if the vehicle is one step to the destination
+                    dest = veh['dest_grid'] # get destination
+                    veh['curr_grid'] = dest # update position
+                    veh['dest_grid'] = None # update destination
+                veh['time_2_empty'] -= 1 # update time to empty
 
         rewards = {}
         for i in range(self.grid_cnt):
@@ -84,3 +107,35 @@ class MyMultiAgentEnv(MultiAgentEnv):
         self.fleet_status = {} # emptying the old data
 
         # add logic for initializing new data after this
+
+    def find_adjacent_groups(self, requests):
+        # generate a list of grouped requests
+        # each group is a list of requests going from zones A and B (adjacent) to zones X and Y (adjacent)
+
+        groups = []  # list to store different groups
+        visited = set()  # mark visited requests in the list
+        locked_pickup_zones = set()
+        locked_dropoff_zones = set()
+
+        for i, req1 in enumerate(requests):  # curr_demands, deal with data structure later
+            if req1['id'] in visited:
+                continue
+
+            group = [req1]  # start to group requests
+            visited.add(req1['id']) # mark a request as 'visited' if a request is added to a group
+
+            # find the first matching request of req1 and establish locked-up zones for matching
+            if not locked_pickup_zones and not locked_dropoff_zones:
+                for req2 in requests[i + 1:]:
+                    if req2['id'] not in visited:
+                        # check adjacency for both pickup and dropoff areas
+                        if (self.are_adjacent(req1['pick_up'], req2['pick_up'])) and (
+                                self.are_adjacent(req1['drop_off'], req2['drop_off'])):
+                            locked_pickup_zones = {req1['pick_up'], req2['pick_up']}
+                            group.append(req2)
+
+            pickup_zones = {req1['pick_up']} # pickup zone to look at
+            dropoff_zones = {req1['drop_off']} # dropoff zone to look at
+
+            for req2 in requests[i + 1:]:  # start to find pooling requests that meet pooling requirements
+                if req2['id'] not in visited:
