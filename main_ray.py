@@ -18,6 +18,9 @@ def main():
         if terminateds["__all__"]:
             break  # Stop if simulation reaches its end
 
+    env.plot_grid_state(step=150)
+    env.plot_grid_state(step=200)
+
     env.save_all_demands()
     env.save_fleet_status()
     print("Simulation completed successfully!")

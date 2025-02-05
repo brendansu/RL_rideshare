@@ -10,6 +10,7 @@ import os
 import networkx as nx
 import pandas as pd
 import time
+import matplotlib.pyplot as plt
 
 import gymnasium as gym
 from ray.rllib.env.multi_agent_env import MultiAgentEnv
@@ -56,6 +57,8 @@ class MyMultiAgentEnv(MultiAgentEnv):
         self.last_move = None
         self.neighbor_query_seq = ["north", "north-east", "north-west", "south", "south-east", "south-west"]
 
+        self.visualization_data = []
+
     def reset(self, *, seed=None, options=None):
         print('reset environment')
         # return observation dict and infos dict.
@@ -81,6 +84,37 @@ class MyMultiAgentEnv(MultiAgentEnv):
             curr_demands = self.left_over_demands + new_orders
         else:
             curr_demands = self.left_over_demands
+
+        # Initialize tracking data
+        solo_veh_distribution = {zone: 0 for zone in self.map}  # Vehicles per grid
+        solo_req_distribution = {zone: 0 for zone in self.map}  # Requests per grid
+        pool_veh_distribution = {zone: 0 for zone in self.map}  # Vehicles per grid
+        pool_req_distribution = {zone: 0 for zone in self.map}  # Requests per grid
+
+        # Count idle vehicles in each grid
+        for veh in self.fleet_status.keys():
+            zone = self.fleet_status[veh]['curr_grid']
+            if self.fleet_status[veh]['pool_auth']:
+                pool_veh_distribution[zone] += 1
+            else:
+                solo_veh_distribution[zone] += 1
+
+        # Count requests in each grid
+        for req_id in curr_demands:
+            zone = self.all_demands[req_id]['pick_up']
+            if self.all_demands[req_id]['pool_auth']:
+                pool_req_distribution[zone] += 1
+            else:
+                solo_req_distribution[zone] += 1
+
+        # Store data for visualization
+        self.visualization_data.append({
+            "step": self.time_step,
+            "solo_veh_distribution": solo_veh_distribution,
+            "solo_req_distribution": solo_req_distribution,
+            "pool_veh_distribution": pool_veh_distribution,
+            "pool_req_distribution": pool_req_distribution
+        })
 
         for req in curr_demands:
             self.all_demands[req]['wait_time'] += 1 # add one time step to the wait time of all trips in curr_demands
@@ -236,7 +270,6 @@ class MyMultiAgentEnv(MultiAgentEnv):
                     status['occupancy'] = 0  # update destination
         toc = time.time()
         print(f"Update fleet status: Elapsed time: {toc - tic:.4f} seconds")
-        print("___________________________________________________________")
 
         # rewards = {}
         # for i in range(self.grid_cnt):
@@ -244,7 +277,8 @@ class MyMultiAgentEnv(MultiAgentEnv):
 
         terminateds = {"__all__": self.time_step >= 288} # 288 stand for 288 time steps in a day, 5 min a step, 20 mph
         toc_step = time.time()
-        print(f"Order dispatching: Elapsed time: {toc_step - tic_step:.4f} seconds")
+        print(f"Current step: Elapsed time: {toc_step - tic_step:.4f} seconds")
+        print("___________________________________________________________")
         return observations, {}, terminateds, {}, {}
 
     def initialize_fleet(self, seed):
@@ -592,3 +626,65 @@ class MyMultiAgentEnv(MultiAgentEnv):
         # Save to CSV
         df.to_csv(filename, index_label="vehicle_id")
         print(f"✅ Saved fleet status to {filename}")
+
+    def plot_grid_state(self, step):
+        """
+        Visualizes the hexagonal grid with the number of vehicles and requests per grid.
+
+        Args:
+            step (int): The simulation step to visualize.
+        """
+        # Load grid map
+        grid_df = gpd.read_file("data/grid_projected.geojson")
+
+        # Get data for the given step
+        step_data = next((data for data in self.visualization_data if data["step"] == step), None)
+        if step_data is None:
+            print(f"Step {step} not found in data.")
+            return
+
+        # Convert distributions to DataFrames
+        solo_req_df = pd.DataFrame(list(step_data["solo_req_distribution"].items()),
+                                   columns=["grid_id", "solo_req_distribution"])
+        pool_req_df = pd.DataFrame(list(step_data["pool_req_distribution"].items()),
+                                   columns=["grid_id", "pool_req_distribution"])
+        solo_veh_df = pd.DataFrame(list(step_data["solo_veh_distribution"].items()),
+                                   columns=["grid_id", "solo_veh_distribution"])
+        pool_veh_df = pd.DataFrame(list(step_data["pool_veh_distribution"].items()),
+                                   columns=["grid_id", "pool_veh_distribution"])
+
+        # Merge with grid map
+        grid_df["grid_id"] = grid_df.index.astype(str)
+        grid_df = (grid_df
+                   .merge(solo_req_df, on="grid_id", how="left")
+                   .merge(pool_req_df, on="grid_id", how="left")
+                   .merge(solo_veh_df, on="grid_id", how="left")
+                   .merge(pool_veh_df, on="grid_id", how="left"))
+
+        # Fill NaN values (grids without requests or vehicles)
+        for col in ["solo_veh_distribution", "pool_req_distribution", "solo_veh_distribution", "pool_veh_distribution"]:
+            grid_df[col].fillna(0, inplace=True)
+
+        # **Plot in a 2×2 layout**
+        fig, axes = plt.subplots(2, 2, figsize=(12, 12))
+
+        # Define subplot titles and data
+        plot_data = [
+            ("Solo Requests", "solo_req_distribution", "Reds", axes[0, 0]),
+            ("Pooled Requests", "pool_req_distribution", "Purples", axes[0, 1]),
+            ("Solo Vehicles", "solo_veh_distribution", "Blues", axes[1, 0]),
+            ("Pooled Vehicles", "pool_veh_distribution", "Greens", axes[1, 1])
+        ]
+
+        # Plot each category
+        for title, column, cmap, ax in plot_data:
+            grid_df.plot(ax=ax, column=column, cmap=cmap, legend=True, alpha=0.7, edgecolor="black")
+            ax.set_title(f"{title} at Step {step}")
+
+            # Add labels
+            for _, row in grid_df.iterrows():
+                centroid = row.geometry.centroid
+                ax.text(centroid.x, centroid.y, f"{int(row[column])}", fontsize=8, ha='center', va='center')
+
+        plt.tight_layout()
+        plt.show()
